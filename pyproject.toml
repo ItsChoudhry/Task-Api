@@ -5,11 +5,15 @@ description = "Example api"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "alembic>=1.17.2",
+    "asyncpg>=0.30.0",
     "fastapi>=0.119.0",
     "httpx>=0.28.1",
     "mypy>=1.18.2",
     "openapi>=2.0.0",
+    "psycopg2-binary>=2.9.11",
     "pydantic>=2.12.2",
     "pydantic-settings>=2.11.0",
+    "sqlalchemy[asyncio]>=2.0.44",
     "uvicorn>=0.37.0",
 ]

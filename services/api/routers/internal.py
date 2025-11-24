@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 from ..services.store import tasks
-from ..models.tast_status import TaskStatus
+from ..schemas.tast_status import TaskStatus
 
 internal_router = APIRouter()
 

@@ -1,4 +1,4 @@
-from ..models.task import Task
+from ..schemas.task import Task
 
 # Tmp to replace with db later
 tasks: dict[str, Task] = {}

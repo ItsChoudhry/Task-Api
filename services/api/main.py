@@ -1,9 +1,9 @@
 from contextlib import asynccontextmanager
 
-from services.api.models.tast_status import TaskStatus
+from .schemas.tast_status import TaskStatus
 from services.api.routers.internal import internal_router
 
-from .models.task import Task
+from .schemas.task import Task
 from .services.store import tasks
 from .routers.protected import protected_router
 from datetime import datetime

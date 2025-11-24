@@ -3,9 +3,9 @@ import logging
 from typing import Optional, Union
 import uuid
 
-from services.api.models.tast_status import TaskStatus
+from services.api.schemas.tast_status import TaskStatus
 from ..auth import require_api_key
-from ..models.task import CreateTask, Task
+from services.api.schemas.task import CreateTask, Task
 from ..services.store import idempotency_map, tasks
 from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks
 from fastapi.responses import JSONResponse
