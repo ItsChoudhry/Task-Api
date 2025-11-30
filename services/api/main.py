@@ -1,47 +1,14 @@
-from contextlib import asynccontextmanager
-
-from .schemas.task_status import TaskStatus
 from services.api.routers.internal import internal_router
 
-from .schemas.task import Task
-from .services.store import tasks
 from .routers.protected import protected_router
-from datetime import datetime
-import uuid
 
 from fastapi import FastAPI, HTTPException
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    placeholder_task = Task(
-        id=str("0"),
-        idempotency_key=str(uuid.uuid4()),
-        model="Placeholder model",
-        param={},
-        inputs={},
-        status=TaskStatus.PROCESSING,
-        result_url="",
-        error="",
-        callback_url="",
-        api_key_id="",
-        created_at=datetime.now(),
-        updated_at=datetime.now(),
-    )
-    tasks[placeholder_task.id] = placeholder_task
-    print(f"Added placeholder task with ID: {placeholder_task.id}")
-
-    yield
-
-    tasks.clear()
-    print("Cleared tasks on shutdown")
-
-
 app = FastAPI(
     title="task_pipeline",
-    lifespan=lifespan,
     docs_url=None,
     redoc_url=None,
 )
