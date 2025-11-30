@@ -1,12 +1,16 @@
 from datetime import datetime, timezone
 import logging
-from typing import Optional, Union
+from typing import Optional
 import uuid
 
-from services.api.schemas.tast_status import TaskStatus
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from services.api.models.base import get_db
 from ..auth import require_api_key
 from services.api.schemas.task import CreateTask, Task
-from ..services.store import idempotency_map, tasks
+from services.api.models.db import TaskDB, TaskDBStatus
 from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks
 from fastapi.responses import JSONResponse
 import httpx
@@ -47,48 +51,65 @@ protected_router = APIRouter(
 
 
 @protected_router.post("/v1/tasks")
-def add_task(
+async def add_task(
     task: CreateTask,
     background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     x_api_key: Optional[str] = Header(None, alias="X-API-KEY"),
 ):
-    if idempotency_key and idempotency_key in idempotency_map:
-        task_id = idempotency_map[idempotency_key]
-        if task_id in tasks:
-            response = JSONResponse(status_code=200, content={"task_id": task_id})
-            response.headers["Location"] = f"/v1/tasks/{task_id}"
-            return response
+    idem_key = idempotency_key or str(uuid.uuid4())
+    task_id = str(uuid.uuid4())
 
-    now = datetime.now(timezone.utc)
-    generated_id = str(uuid.uuid4())
-    idem_key = idempotency_key or generated_id
-    new_task = Task(
-        id=generated_id,
+    # 1. Idempotency check — replay if already exists
+    existing = await db.execute(
+        select(TaskDB).where(TaskDB.idempotency_key == idem_key)
+    )
+    existing = existing.scalar_one_or_none()
+
+    if existing:
+        return JSONResponse(
+            status_code=200,
+            content={"task_id": existing.id},
+            headers={"Location": f"/v1/tasks/{existing.id}"},
+        )
+
+    new_task = TaskDB(
+        id=task_id,
         idempotency_key=idem_key,
         model=task.model,
-        param=task.param,
-        inputs=task.inputs,
-        status=TaskStatus.RECEIVED,
-        result_url=None,
-        error=None,
+        param=task.param or {},
+        inputs=task.inputs or {},
+        status=TaskDBStatus.received,
         callback_url=task.callback_url,
-        api_key_id="",
-        created_at=now,
-        updated_at=now,
+        api_key_id=x_api_key,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
     )
 
-    tasks[new_task.id] = new_task
-    if idem_key:
-        idempotency_map[idem_key] = new_task.id
+    db.add(new_task)
 
-    new_task.update_status(TaskStatus.PENDING)
-    background_tasks.add_task(
-        trigger_worker, new_task.id, new_task.model, new_task.inputs
-    )
+    try:
+        await db.commit()
+        await db.refresh(new_task)
+    except IntegrityError:
+        await db.rollback()
+        # Race condition — someone else won → replay their task
+        replay = await db.execute(select(Task).where(Task.idempotency_key == idem_key))
+        replay_task = replay.scalar_one_or_none()
+        if replay_task:
+            return JSONResponse(
+                status_code=200,
+                content={"task_id": replay_task.id},
+                headers={"Location": f"/v1/tasks/{replay_task.id}"},
+            )
+        raise HTTPException(500, "Database error")
 
-    response = JSONResponse(status_code=201, content={"task_id": generated_id})
-    response.headers["Location"] = f"/v1/tasks/{generated_id}"
+    background_tasks.add_task(trigger_worker, task_id, task.model, task.inputs)
+
+    response = JSONResponse(content={"task_id": task_id})
+    response.status_code = 201
+    response.headers["Location"] = f"/v1/tasks/{task_id}"
     return response
 
 
@@ -110,12 +131,12 @@ def trigger_worker(id: str, model: str, inputs: dict):
         logging.error(f"Trigger worker failed {e}")
 
 
-@protected_router.get("/v1/tasks/{task_id}")
-def get_task(task_id: str, q: Union[str, None] = None):
-    task = tasks[task_id]
+@protected_router.get("/v1/tasks/{task_id}", response_model=Task)
+async def get_task(task_id: str, db: AsyncSession = Depends(get_db)):
+    task = await db.get(TaskDB, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    return task
+    return Task.model_validate(task)
 
 
 @protected_router.get("/v1/models")
@@ -124,7 +145,12 @@ def list_models():
 
 
 @protected_router.get("/readyz")
-def ready_check():
-    # _perform_health_checks()
-    # check db, redis ping, minIO access check
-    return JSONResponse(status_code=200, content={"status": "ready"})
+async def ready_check(db: AsyncSession = Depends(get_db)):
+    try:
+        # _perform_health_checks()
+        # check redis ping, minIO access check
+        await db.execute(select(1))
+        return JSONResponse(status_code=200, content={"status": "ready"})
+    except Exception as e:
+        logging.error(f"Readiness probe failed: {e}")
+        raise HTTPException(status_code=503, detail="Service unhealthy")

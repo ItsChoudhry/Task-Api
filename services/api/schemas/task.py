@@ -1,10 +1,12 @@
 from typing import Optional
 from pydantic import BaseModel
 from datetime import datetime, timezone
-from .tast_status import TaskStatus
+from .task_status import TaskStatus
 
 
 class Task(BaseModel):
+    model_config = {"from_attributes": True}
+
     id: str
     idempotency_key: Optional[str] = None
     model: str

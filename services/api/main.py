@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from .schemas.tast_status import TaskStatus
+from .schemas.task_status import TaskStatus
 from services.api.routers.internal import internal_router
 
 from .schemas.task import Task
