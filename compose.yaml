@@ -5,6 +5,9 @@ services:
       dockerfile: services/api/Dockerfile
     ports:
       - "8000:8000"
+    depends_on:
+      - db
+      - redis
     volumes:
       - ./services/api:/app/services/api
     environment:
@@ -12,19 +15,6 @@ services:
       - PYTHONUNBUFFERED=1
       - INTERNAL_KEY=worker-key
     command: uv run uvicorn services.api.main:app --host 0.0.0.0 --port 8000 --reload
-
-  worker:
-    build:
-      context: .
-      dockerfile: services/worker/Dockerfile
-    ports:
-      - "9000:9000"
-    volumes:
-      - ./services/worker:/app/services/worker
-    environment:
-      - API_KEY=DEV-KEY
-      - PYTHONUNBUFFERED=1
-    command: uv run uvicorn services.worker.main:app --host 0.0.0.0 --port 9000 --reload
 
   db:
     image: postgres:16-alpine
@@ -43,5 +33,29 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+
+  worker:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    command: uv run rq worker tasks
+    depends_on:
+      - redis
+      - api
+    environment:
+      - PYTHONUNBUFFERED=1
+      - REDIS_HOST=redis
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  redis_data:

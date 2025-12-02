@@ -2,9 +2,7 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Update package lists and install curl
 RUN apt-get update && apt-get install -y \
-    curl \
     gcc \
     python3-dev \
     && apt-get clean \
@@ -12,14 +10,13 @@ RUN apt-get update && apt-get install -y \
 
 RUN pip install --no-cache-dir uv
 
-RUN uv --version
+COPY pyproject.toml uv.lock* ./
+COPY services/worker ./services/worker
 
-COPY services/worker /app/services/worker
+# Install dependencies (including rq, redis)
+RUN uv sync --frozen --no-cache
 
-COPY pyproject.toml .
+# No EXPOSE needed — RQ worker doesn't listen on HTTP
 
-RUN uv sync
-
-EXPOSE 9000
-
-CMD ["uv", "run", "uvicorn", "services.worker.main:app", "--host", "0.0.0.0", "--port", "9000", "--reload"]
+# This is the correct way to run RQ worker in 2025
+CMD ["uv", "run", "rq", "worker", "tasks"]

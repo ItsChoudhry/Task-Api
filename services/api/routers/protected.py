@@ -7,15 +7,19 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from rq import Queue
+from redis import Redis
+
 from services.api.models.base import get_db
 from ..auth import require_api_key
 from services.api.schemas.task import CreateTask, Task
 from services.api.models.db import TaskDB, TaskDBStatus
-from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Header
 from fastapi.responses import JSONResponse
-import httpx
 
 rate_limit_map: dict[str, tuple[int, datetime]] = {}
+
+queue = Queue("tasks", connection=Redis(host="redis", port=6379))
 
 
 def check_rate(x_api_key: str = Header(...)):
@@ -53,7 +57,6 @@ protected_router = APIRouter(
 @protected_router.post("/v1/tasks")
 async def add_task(
     task: CreateTask,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     x_api_key: Optional[str] = Header(None, alias="X-API-KEY"),
@@ -61,7 +64,6 @@ async def add_task(
     idem_key = idempotency_key or str(uuid.uuid4())
     task_id = str(uuid.uuid4())
 
-    # 1. Idempotency check — replay if already exists
     existing = await db.execute(
         select(TaskDB).where(TaskDB.idempotency_key == idem_key)
     )
@@ -95,7 +97,9 @@ async def add_task(
     except IntegrityError:
         await db.rollback()
         # Race condition — someone else won → replay their task
-        replay = await db.execute(select(Task).where(Task.idempotency_key == idem_key))
+        replay = await db.execute(
+            select(TaskDB).where(TaskDB.idempotency_key == idem_key)
+        )
         replay_task = replay.scalar_one_or_none()
         if replay_task:
             return JSONResponse(
@@ -105,30 +109,19 @@ async def add_task(
             )
         raise HTTPException(500, "Database error")
 
-    background_tasks.add_task(trigger_worker, task_id, task.model, task.inputs)
+    queue.enqueue(
+        "services.worker.main.process_task",
+        task_id,
+        task.model,
+        task.inputs,
+        job_timeout=3600,  # optional: 1 hour max
+        description=f"Process task {task_id}",
+    )
 
     response = JSONResponse(content={"task_id": task_id})
     response.status_code = 201
     response.headers["Location"] = f"/v1/tasks/{task_id}"
     return response
-
-
-def trigger_worker(id: str, model: str, inputs: dict):
-    payload = {
-        "task_id": id,
-        "model": model,
-        "inputs": inputs,
-    }
-    try:
-        httpx.post(
-            "http://worker:9000/process",
-            json=payload,
-            headers={"X-Worker-Key": "worker-key"},
-            timeout=30.0,
-        )
-        logging.info("Triggered worker")
-    except Exception as e:
-        logging.error(f"Trigger worker failed {e}")
 
 
 @protected_router.get("/v1/tasks/{task_id}", response_model=Task)
