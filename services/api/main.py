@@ -5,6 +5,7 @@ from .routers.protected import protected_router
 from fastapi import FastAPI, HTTPException
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 
 
 app = FastAPI(
@@ -12,6 +13,8 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
 )
+
+Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
 app.include_router(protected_router)
 app.include_router(internal_router)

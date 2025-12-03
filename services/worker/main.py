@@ -6,6 +6,13 @@ from typing import Optional
 import httpx
 from redis import Redis
 from rq import Queue
+from prometheus_client import Counter, start_http_server
+
+
+JOBS_COMPLETED = Counter("rq_jobs_completed_total", "Total completed jobs")
+JOBS_FAILED = Counter("rq_jobs_failed_total", "Total failed jobs")
+
+start_http_server(8001)
 
 redis_conn = Redis(host="redis", port=6379, db=0)
 
@@ -61,6 +68,7 @@ def send_request_update(task_id: str, status: str, result_url: Optional[str] = N
         )
         print(f"Task {task_id} → {status}")
     except Exception as e:
+        JOBS_FAILED.inc()
         print(f"Failed update status to {status} for {task_id}: {e}")
 
 
@@ -91,6 +99,7 @@ def process_task(task_id: str, model: str, inputs: dict):
 
     download_url = generate_presigned_url(task_id)
 
+    JOBS_COMPLETED.inc()
     send_request_update(task_id, "completed", download_url)
 
 
