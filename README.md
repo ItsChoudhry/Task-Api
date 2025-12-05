@@ -33,4 +33,7 @@ curl -i -X POST http://localhost:8000/v1/tasks \
 -H "Idempotency-Key: 123" \
 -d '{"model": "task_model_v1", "param": {"key1": "value1", "key2": "value2"}, "inputs": {"input1": "data1", "input2": "data2"}, "callback_url": "https://example.com/callback"}'
 
+
+curl -H "X-API-KEY: DEV-KEY" http://localhost:8000/v1/tasks/<task_id>
+
 ```
