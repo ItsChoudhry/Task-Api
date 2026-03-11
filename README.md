@@ -10,8 +10,6 @@ This project is to showcase building a end to end api for inference tasks based 
 - postgres
 - Redis + RQ
 - minio
-- Prometheus
-- Grafana
 
 ## Request Diagram
 
